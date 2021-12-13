@@ -17,9 +17,10 @@
 
 package org.apache.kyuubi.session
 
+import scala.collection.JavaConverters._
 import com.codahale.metrics.MetricRegistry
+import com.google.common.collect.{ImmutableMap, Maps}
 import org.apache.hive.service.rpc.thrift._
-
 import org.apache.kyuubi.KyuubiSQLException
 import org.apache.kyuubi.client.KyuubiSyncThriftClient
 import org.apache.kyuubi.config.KyuubiConf
@@ -43,11 +44,22 @@ class KyuubiSessionImpl(
     sessionConf: KyuubiConf)
   extends AbstractSession(protocol, user, password, ipAddress, conf, sessionManager) {
 
-  // TODO: needs improve the hardcode
-  normalizedConf.foreach {
-    case ("use:database", _) =>
-    case ("kyuubi.engine.pool.size.threshold", _) =>
-    case (key, value) => sessionConf.set(key, value)
+  {
+    // TODO: needs improve the hardcode
+    val invalidatedKey = Set("use:database", "kyuubi.engine.pool.size.threshold")
+    val validatedSessionConf = normalizedConf.filterKeys(x => !invalidatedKey.contains(x))
+
+    val sessionConfMap = ImmutableMap.copyOf(sessionConf.getAll.asJava)
+    val confDefault = sessionManager.sessionConfAdvisor.getConfDefault(
+      user,
+      sessionConfMap).asScala
+    val confOverlay = sessionManager.sessionConfAdvisor.getConfOverlay(
+      user,
+      sessionConfMap).asScala
+
+    (confDefault ++ validatedSessionConf ++ confOverlay).foreach {
+      case (key, value) => sessionConf.set(key, value)
+    }
   }
 
   val engine: EngineRef = new EngineRef(sessionConf, user)

@@ -17,16 +17,22 @@
 
 package org.apache.kyuubi.engine.spark
 
+import java.util
+
+import scala.collection.JavaConverters._
+
 import org.apache.kyuubi.WithKyuubiServer
 import org.apache.kyuubi.config.KyuubiConf
 import org.apache.kyuubi.config.KyuubiConf._
 import org.apache.kyuubi.operation.HiveJDBCTestHelper
+import org.apache.kyuubi.plugin.SessionConfAdvisor
 
 class SparkSqlEngineSuite extends WithKyuubiServer with HiveJDBCTestHelper {
   override protected val conf: KyuubiConf = {
     KyuubiConf()
       .set(SESSION_CONF_IGNORE_LIST.key, "kyuubi.abc.xyz,spark.sql.abc.xyz,spark.sql.abc.var")
       .set(SESSION_CONF_RESTRICT_LIST.key, "kyuubi.xyz.abc,spark.sql.xyz.abc,spark.sql.xyz.abc.var")
+      .set(SESSION_CONF_ADVISOR.key, classOf[TestSessionConfAdvisor].getName)
   }
 
   test("ignore config via system settings") {
@@ -124,5 +130,40 @@ class SparkSqlEngineSuite extends WithKyuubiServer with HiveJDBCTestHelper {
     }
   }
 
+  test("test session conf plugin") {
+    withSessionConf()(Map())(Map("spark.k1" -> "v0", "spark.k3" -> "v4")) {
+      withJdbcStatement() { statement =>
+        val r1 = statement.executeQuery("set spark.k1")
+        assert(r1.next())
+        assert(r1.getString(2) == "v0")
+
+        val r2 = statement.executeQuery("set spark.k2")
+        assert(r2.next())
+        assert(r2.getString(2) == "v2")
+
+        val r3 = statement.executeQuery("set spark.k3")
+        assert(r3.next())
+        assert(r3.getString(2) == "v3")
+
+        val r4 = statement.executeQuery("set spark.k4")
+        assert(r4.next())
+        assert(r4.getString(2) == "v4")
+      }
+    }
+  }
+
   override protected def jdbcUrl: String = getJdbcUrl
+
+}
+
+class TestSessionConfAdvisor extends SessionConfAdvisor {
+  override def getConfDefault(
+      user: String, sessionConf: util.Map[String, String]): util.Map[String, String] = {
+    Map("spark.k1" -> "v1", "spark.k2" -> "v2").asJava
+  }
+
+  override def getConfOverlay(
+      user: String, sessionConf: util.Map[String, String]): util.Map[String, String] = {
+    Map("spark.k3" -> "v3", "spark.k4" -> "v4").asJava
+  }
 }
